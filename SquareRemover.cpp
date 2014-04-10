@@ -253,9 +253,9 @@ public:
         vector<Node> stages[MAX_MOVES + 1];
         stages[0].push_back(Node(init_board, vector<Action>(), -1, -1));
 
+        const int beam_width = 16 * 16 * 6 / (n * n * colors);
         rep(moves, MAX_MOVES)
         {
-            const int beam_width = 1;
 
             auto& stage = stages[moves];
             sort(all(stage));
@@ -268,16 +268,21 @@ public:
             {
                 const Node& node = stage[node_i];
 
-//                 int num_colors[6] = {};
-//                 rep(y, n) rep(x, n)
-//                     ++num_colors[node.board.at(x, y)];
-//                 const int color = max_element(num_colors, num_colors + colors) - num_colors;
-
-                rep(ty, n - 1) rep(tx, n - 1) rep(color, colors)
+                rep(ty, n - 1) rep(tx, n - 1)
                 {
-                    int order[] = { 0, 1, 2, 3 };
-//                     do
-//                     {
+                    vector<pint> num_colors(colors);
+                    rep(i, colors)
+                        num_colors[i] = pint(0, i);
+                    rep(i, 2) rep(j, 2)
+                        ++num_colors[node.board.at(tx + rect_dx[j], ty + rect_dy[i])].first;
+                    sort(all(num_colors), greater<pint>());
+                    vector<int> use_colors = { num_colors[0].second, num_colors[1].second };
+//                     rep(color, colors)
+                    for (int color : use_colors)
+                    {
+                        int order[] = { 0, 1, 2, 3 };
+                        //                     do
+                        //                     {
                         Board board = node.board;
                         vector<Action> actions;
                         if (solve_actions(tx, ty, color, order, board, actions))
@@ -293,7 +298,8 @@ public:
                                     stages[next_moves].pop_back();
                             }
                         }
-//                     } while (next_permutation(order, order + 4));
+                        //                     } while (next_permutation(order, order + 4));
+                    }
                 }
             }
         }
@@ -350,6 +356,9 @@ private:
             if (!solve_min_actions(board, sx, sy, color, fixed, acts))
                 return false;
 
+//             if (res_actions.size() + acts.size() >= 5)
+//                 return false;
+
             for (auto& a : acts)
             {
                 board.move(a);
@@ -399,25 +408,13 @@ private:
                     y += dir_dy[dir];
                 }
 
-                bool ok = true;
-                Board b = board;
-                for (auto& a : actions)
-                {
-                    if (b.at(a.x, a.y) != color)
-                    {
-                        ok = false;
-                        break;
-                    }
-                    b.move(a);
-                }
-                if (ok)
-                {
-                    res_actions.insert(res_actions.end(), all(actions));
-                    return true;
-                }
+                res_actions.insert(res_actions.end(), all(actions));
+                return true;
             }
 
             const int ncost = cost[cy][cx] + 1;
+            if (ncost >= 3)
+                return false;
             rep(dir, 4)
             {
                 int nx = cx + dir_dx[dir];
