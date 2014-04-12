@@ -64,7 +64,7 @@ typedef long long ll;
 typedef pair<int, int> pint;
 
 
-
+typedef unsigned long long ull;
 typedef unsigned int uint;
 typedef unsigned short ushort;
 typedef unsigned char uchar;
@@ -202,6 +202,18 @@ public:
         adjust(q);
     }
 
+    bool operator==(const Board& other) const
+    {
+        if (score != other.score)
+            return false;
+
+        rep(y, n) rep(x, n)
+            if (at(x, y) != other.at(x, y))
+                return false;
+
+        return true;
+    }
+
     string to_s() const
     {
         string res;
@@ -212,6 +224,15 @@ public:
             res += "\n";
         }
         return res;
+    }
+
+    ull hash() const
+    {
+        const ull base = ten(9) + 7;
+        ull h = 0;
+        rep(y, n) rep(x, n)
+            h = h * base + at(x, y);
+        return h;
     }
 
 private:
@@ -253,57 +274,86 @@ public:
         vector<Node> stages[MAX_MOVES + 1];
         stages[0].push_back(Node(init_board, vector<Action>(), -1, -1));
 
-        const int beam_width = 16 * 16 * 6 / (n * n * colors);
+        const int beam_width = 12 * 16 * 16 / (max(10, n) * max(10, n));
         rep(moves, MAX_MOVES)
         {
-
             auto& stage = stages[moves];
-            sort(all(stage));
-            if (stage.size() > beam_width)
-                stage.erase(stage.begin() + beam_width, stage.end());
+            if (stage.empty())
+                continue;
 
-//             dump(moves);
+//             vector<int> scores;
+//             for (Node& node : stage)
+//                 scores.push_back(node.board.get_score());
+//             sort(all(scores));
+//             fprintf(stderr, "%5d: %d\n", moves, stage.size());
+//             cerr << scores << endl;
 
             rep(node_i, stage.size())
             {
                 const Node& node = stage[node_i];
 
-                rep(ty, n - 1) rep(tx, n - 1)
+                int nexts = 0;
+
+                for (int max_cost = 2; nexts == 0 && max_cost <= 4; ++max_cost)
                 {
-                    vector<pint> num_colors(colors);
-                    rep(i, colors)
-                        num_colors[i] = pint(0, i);
-                    rep(i, 2) rep(j, 2)
-                        ++num_colors[node.board.at(tx + rect_dx[j], ty + rect_dy[i])].first;
-                    sort(all(num_colors), greater<pint>());
-                    vector<int> use_colors = { num_colors[0].second, num_colors[1].second };
-//                     rep(color, colors)
-                    for (int color : use_colors)
+                    rep(ty, n - 1) rep(tx, n - 1)
                     {
-                        int order[] = { 0, 1, 2, 3 };
-                        //                     do
-                        //                     {
-                        Board board = node.board;
-                        vector<Action> actions;
-                        if (solve_actions(tx, ty, color, order, board, actions))
+                        int num_colors[6] = {};
+                        rep(i, 4)
+                            ++num_colors[node.board.at(tx + rect_dx[i], ty + rect_dy[i])];
+                        vector<int> use_colors;
+                        rep(color, colors)
+                            if (num_colors[color] >= 2)
+                                use_colors.push_back(color);
+
+                        //                     rep(color, colors)
+                        for (int color : use_colors)
                         {
-                            assert(actions.size() > 0);
-                            int next_moves = moves + actions.size();
-                            if (next_moves <= MAX_MOVES)
+                            int order[] = { 0, 1, 2, 3 };
+                            //                         do
+                            //                         {
+                            Board board = node.board;
+                            vector<Action> actions;
+                            if (solve_actions(tx, ty, color, order, max_cost, board, actions))
                             {
-                                Node next_node(board, actions, moves, node_i);
-                                stages[next_moves].push_back(next_node);
-                                sort(all(stages[next_moves]));
-                                if (stages[next_moves].size() > beam_width)
-                                    stages[next_moves].pop_back();
+                                assert(actions.size() > 0);
+                                int next_moves = moves + actions.size();
+                                if (next_moves <= MAX_MOVES)
+                                {
+                                    Node next_node(board, actions, moves, node_i);
+                                    bool diff_state = true;
+                                    for (Node& no : stages[next_moves])
+                                        if (board == no.board)
+                                            diff_state = false;
+                                    if (diff_state)
+                                    {
+                                        if (stages[next_moves].size() == beam_width)
+                                        {
+                                            rep(i, stages[next_moves].size())
+                                            {
+                                                if (next_node < stages[next_moves][i])
+                                                {
+                                                    stages[next_moves][i] = next_node;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        else
+                                            stages[next_moves].push_back(next_node);
+
+                                        ++nexts;
+//                                         if (nexts >= 10)
+//                                             goto NodeEnd;
+                                    }
+                                }
                             }
+                            //                         } while (next_permutation(order, order + 4));
                         }
-                        //                     } while (next_permutation(order, order + 4));
                     }
+NodeEnd:;
                 }
             }
         }
-
 
         int best_score = -1, best_moves, best_index;
         rep(moves, MAX_MOVES + 1) rep(i, stages[moves].size())
@@ -335,7 +385,7 @@ public:
     }
 
 private:
-    bool solve_actions(int tx, int ty, int color, const int* order, Board& board, vector<Action>& res_actions)
+    bool solve_actions(int tx, int ty, int color, const int* order, int max_cost, Board& board, vector<Action>& res_actions)
     {
         assert(0 <= color && color < colors);
         assert(in_sq(tx, ty, n));
@@ -350,28 +400,38 @@ private:
         {
             int sx = tx + rect_dx[i];
             int sy = ty + rect_dy[i];
-            assert(fixed[sy][sx] == false);
+            if (board.at(sx, sy) == color)
+                fixed[sy][sx] = true;
+        }
 
-            vector<Action> acts;
-            if (!solve_min_actions(board, sx, sy, color, fixed, acts))
+        const int ori_score = board.get_score();
+        rep(i, 4)
+        {
+            int sx = tx + rect_dx[i];
+            int sy = ty + rect_dy[i];
+
+            if (res_actions.size() >= max_cost && board.at(sx, sy) != color)
                 return false;
 
-//             if (res_actions.size() + acts.size() >= 5)
-//                 return false;
+            vector<Action> acts;
+            if (!solve_min_actions(board, sx, sy, color, fixed, max_cost, acts))
+                return false;
 
             for (auto& a : acts)
             {
                 board.move(a);
                 res_actions.push_back(a);
+                if (board.get_score() > ori_score)
+                    return true;
             }
-//             if (board.at(sx, sy) != color)
-//                 return false;
+            if (board.at(sx, sy) != color)
+                return false;
 
             fixed[sy][sx] = true;
         }
         return true;
     }
-    bool solve_min_actions(const Board& board, int sx, int sy, int color, const bool fixed[16][16], vector<Action>& res_actions)
+    bool solve_min_actions(const Board& board, int sx, int sy, int color, const bool fixed[16][16], int max_cost, vector<Action>& res_actions)
     {
         assert(in_sq(sx, sy, n));
 
@@ -395,26 +455,9 @@ private:
             const int cx = q.front().first, cy = q.front().second;
             q.pop();
 
-            if (board.at(cx, cy) == color)
-            {
-                vector<Action> actions;
-                for (int x = cx, y = cy; cost[y][x] > 0; )
-                {
-                    assert(cost[y][x] < inf);
-                    Dir dir = rev_dir(used_dir[y][x]);
-                    actions.push_back(Action(x, y, dir));
-
-                    x += dir_dx[dir];
-                    y += dir_dy[dir];
-                }
-
-                res_actions.insert(res_actions.end(), all(actions));
-                return true;
-            }
-
             const int ncost = cost[cy][cx] + 1;
-            if (ncost >= 3)
-                return false;
+            if (ncost > max_cost)
+                continue;
             rep(dir, 4)
             {
                 int nx = cx + dir_dx[dir];
@@ -423,6 +466,24 @@ private:
                 {
                     cost[ny][nx] = ncost;
                     used_dir[ny][nx] = Dir(dir);
+
+                    if (board.at(nx, ny) == color)
+                    {
+                        vector<Action> actions;
+                        for (int x = nx, y = ny; cost[y][x] > 0; )
+                        {
+                            assert(cost[y][x] < inf);
+                            Dir dir = rev_dir(used_dir[y][x]);
+                            actions.push_back(Action(x, y, dir));
+
+                            x += dir_dx[dir];
+                            y += dir_dy[dir];
+                        }
+
+                        res_actions.insert(res_actions.end(), all(actions));
+                        return true;
+                    }
+
                     q.push(pint(nx, ny));
                 }
             }
