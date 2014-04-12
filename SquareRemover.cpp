@@ -77,6 +77,124 @@ uchar pcc_first(ushort pair) { return pair >> 8; }
 uchar pcc_second(ushort pair) { return pair & 0xff; }
 
 
+template <typename T, int SIZE>
+class Queue
+{
+public:
+    Queue()
+        : front_p(0), back_p(0)
+    {
+    }
+
+    void push(T a)
+    {
+        assert(back_p < SIZE);
+        data[back_p++] = a;
+    }
+    T& front()
+    {
+        return data[front_p];
+    }
+    void pop()
+    {
+        ++front_p;
+    }
+    int size() const
+    {
+        return back_p - front_p;
+    }
+    bool empty() const
+    {
+        return size() == 0;
+    }
+    void clear()
+    {
+        front_p = back_p = 0;
+    }
+
+private:
+    T data[SIZE];
+    int front_p, back_p;
+};
+template <typename T, int SIZE>
+class PriorityQueue
+{
+public:
+    PriorityQueue()
+        : n(0)
+    {
+    }
+
+    void push(const T& a)
+    {
+        data[n++] = a;
+        up(n - 1);
+        assert(n <= SIZE);
+    }
+
+    void pop()
+    {
+        data[0] = data[--n];
+        down(0);
+    }
+
+    T top() const
+    {
+        return data[0];
+    }
+
+    int size() const
+    {
+        return n;
+    }
+
+    bool empty() const
+    {
+        return size() == 0;
+    }
+
+    void clear()
+    {
+        n = 0;
+    }
+
+private:
+    T data[SIZE];
+    int n;
+
+    void up(int k)
+    {
+        while (k > 0)
+        {
+            int par = (k - 1) / 2;
+            if (!(data[k] < data[par]))
+                break;
+
+            swap(data[k], data[par]);
+            k = par;
+        }
+    }
+
+    void down(int k)
+    {
+        for (;;)
+        {
+            int next = k;
+            int a = 2 * k + 1, b = 2 * k + 2;
+            if (a < n && data[a] < data[next])
+                next = a;
+            if (b < n && data[b] < data[next])
+                next = b;
+
+            if (next == k)
+                break;
+
+            swap(data[k], data[next]);
+            k = next;
+        }
+    }
+};
+
 ///
 const int dir_dx[] = { 0, 1, 0, -1 };
 const int dir_dy[] = { 1, 0, -1, 0 };
@@ -101,6 +219,7 @@ public:
         : x(x), y(y), dir(dir)
     {
     }
+    Action(){}
 
     int x, y;
     Dir dir;
@@ -137,7 +256,8 @@ public:
     }
 
 private:
-    typedef priority_queue<uint, vector<uint>, greater<uint>> PQ;
+//     typedef priority_queue<uint, vector<uint>, greater<uint>> PQ;
+    typedef PriorityQueue<uint, 16 * 16> PQ;
     void push_q(int tx, int ty, PQ& q) const
     {
         rep(i, 4)
@@ -152,7 +272,6 @@ private:
     {
         while (!q.empty())
         {
-//             int ty = q.top().first, tx = q.top().second;
             int ty = pss_first(q.top());
             int tx = pss_second(q.top());
             q.pop();
@@ -160,6 +279,7 @@ private:
             if (all_same(tx, ty))
             {
                 ++score;
+
                 rep(i, 4)
                 {
                     int x = tx + rect_dx[i];
@@ -168,11 +288,14 @@ private:
                     board[y][x] = (*buffer)[buffer_index++];
                 }
 
-                rep(i, 4)
+                rep(i, 9)
                 {
-                    int x = tx + rect_dx[i];
-                    int y = ty + rect_dy[i];
-                    push_q(x, y, q);
+                    static const int ndx[] = { -1, 0, 1, -1, 0, 1, -1, 0, 1 };
+                    static const int ndy[] = { -1, -1, -1, 0, 0, 0, 1, 1, 1 };
+                    int x = tx + ndx[i];
+                    int y = ty + ndy[i];
+                    if (in_sq(x, y, n - 1) && all_same(x, y))
+                        q.push(pss(y, x));
                 }
             }
         }
@@ -204,7 +327,7 @@ public:
 
     bool operator==(const Board& other) const
     {
-        if (score != other.score)
+        if (buffer_index!= other.buffer_index)
             return false;
 
         rep(y, n) rep(x, n)
@@ -246,13 +369,13 @@ private:
 
     bool all_same(int tx, int ty) const
     {
-        int c = board[ty][tx];
+        int c = at(tx, ty);
         rep(i, 4)
         {
             int x = tx + rect_dx[i];
             int y = ty + rect_dy[i];
             assert(in_sq(x, y, n));
-            if (board[y][x] != c)
+            if (at(x, y) != c)
                 return false;
         }
         return true;
@@ -301,32 +424,35 @@ public:
                         int num_colors[6] = {};
                         rep(i, 4)
                             ++num_colors[node.board.at(tx + rect_dx[i], ty + rect_dy[i])];
-                        vector<int> use_colors;
+                        static vector<int> use_colors;
+                        use_colors.clear();
                         rep(color, colors)
-                            if (num_colors[color] >= 2)
+                            if (num_colors[color] >= (4 - max_cost))
                                 use_colors.push_back(color);
 
-                        //                     rep(color, colors)
                         for (int color : use_colors)
                         {
-                            int order[] = { 0, 1, 2, 3 };
-                            //                         do
-                            //                         {
                             Board board = node.board;
-                            vector<Action> actions;
-                            if (solve_actions(tx, ty, color, order, max_cost, board, actions))
+                            static vector<Action> actions;
+                            actions.clear();
+                            if (solve_actions(tx, ty, color, max_cost, board, actions))
                             {
                                 assert(actions.size() > 0);
-                                int next_moves = moves + actions.size();
+                                const int next_moves = moves + actions.size();
                                 if (next_moves <= MAX_MOVES)
                                 {
-                                    Node next_node(board, actions, moves, node_i);
                                     bool diff_state = true;
                                     for (Node& no : stages[next_moves])
+                                    {
                                         if (board == no.board)
+                                        {
                                             diff_state = false;
+                                            break;
+                                        }
+                                    }
                                     if (diff_state)
                                     {
+                                        Node next_node(board, actions, moves, node_i);
                                         if (stages[next_moves].size() == beam_width)
                                         {
                                             rep(i, stages[next_moves].size())
@@ -342,12 +468,9 @@ public:
                                             stages[next_moves].push_back(next_node);
 
                                         ++nexts;
-//                                         if (nexts >= 10)
-//                                             goto NodeEnd;
                                     }
                                 }
                             }
-                            //                         } while (next_permutation(order, order + 4));
                         }
                     }
 NodeEnd:;
@@ -371,8 +494,8 @@ NodeEnd:;
         for (int moves = best_moves, index = best_index; moves > 0; )
         {
             Node& node = stages[moves][index];
-            auto& acts = node.actions;
-            for (int i = sz(acts) - 1; i >= 0; --i)
+            Action* acts = node.actions;
+            for (int i = node.actions_size - 1; i >= 0; --i)
                 actions.push_back(acts[i]);
 
             moves = node.prev_moves;
@@ -385,7 +508,7 @@ NodeEnd:;
     }
 
 private:
-    bool solve_actions(int tx, int ty, int color, const int* order, int max_cost, Board& board, vector<Action>& res_actions)
+    bool solve_actions(int tx, int ty, int color, int max_cost, Board& board, vector<Action>& res_actions)
     {
         assert(0 <= color && color < colors);
         assert(in_sq(tx, ty, n));
@@ -393,27 +516,36 @@ private:
         res_actions.clear();
 
         bool fixed[16][16];
-        rep(y, n) rep(x, n)
-            fixed[y][x] = false;
+        for (int y = max(0, ty - max_cost); y <= min(n - 1, ty + max_cost); ++y)
+            for (int x = max(0, tx - max_cost); x <= min(n - 1, tx + max_cost); ++x)
+                fixed[y][x] = false;
 
+        int diffs = 4;
         rep(i, 4)
         {
             int sx = tx + rect_dx[i];
             int sy = ty + rect_dy[i];
             if (board.at(sx, sy) == color)
+            {
                 fixed[sy][sx] = true;
+                --diffs;
+            }
         }
 
         const int ori_score = board.get_score();
         rep(i, 4)
         {
-            int sx = tx + rect_dx[i];
-            int sy = ty + rect_dy[i];
+            const int sx = tx + rect_dx[i];
+            const int sy = ty + rect_dy[i];
 
-            if (res_actions.size() >= max_cost && board.at(sx, sy) != color)
+            if (res_actions.size() + diffs > max_cost)
                 return false;
 
-            vector<Action> acts;
+            if (fixed[sy][sx])
+                continue;
+
+            static vector<Action> acts;
+            acts.clear();
             if (!solve_min_actions(board, sx, sy, color, fixed, max_cost, acts))
                 return false;
 
@@ -428,6 +560,7 @@ private:
                 return false;
 
             fixed[sy][sx] = true;
+            --diffs;
         }
         return true;
     }
@@ -435,29 +568,29 @@ private:
     {
         assert(in_sq(sx, sy, n));
 
-        if (fixed[sy][sx] && board.at(sx, sy) != color)
-            return false;
-
         if (board.at(sx, sy) == color)
             return true;
 
         const int inf = ten(7);
         int cost[16][16];
         Dir used_dir[16][16];
-        rep(y, n) rep(x, n)
-            cost[y][x] = inf;
+        for (int y = max(0, sy - max_cost); y <= min(n - 1, sy + max_cost); ++y)
+            for (int x = max(0, sx - max_cost); x <= min(n - 1, sx + max_cost); ++x)
+                cost[y][x] = inf;
 
-        queue<pint> q;
+        Queue<uint, 16 * 16> q;
         cost[sy][sx] = 0;
-        q.push(pint(sx, sy));
+        q.push(pss(sx, sy));
         while (!q.empty())
         {
-            const int cx = q.front().first, cy = q.front().second;
+            const int cx = pss_first(q.front());
+            const int cy = pss_second(q.front());
             q.pop();
 
             const int ncost = cost[cy][cx] + 1;
             if (ncost > max_cost)
                 continue;
+
             rep(dir, 4)
             {
                 int nx = cx + dir_dx[dir];
@@ -469,22 +602,19 @@ private:
 
                     if (board.at(nx, ny) == color)
                     {
-                        vector<Action> actions;
                         for (int x = nx, y = ny; cost[y][x] > 0; )
                         {
                             assert(cost[y][x] < inf);
                             Dir dir = rev_dir(used_dir[y][x]);
-                            actions.push_back(Action(x, y, dir));
+                            res_actions.push_back(Action(x, y, dir));
 
                             x += dir_dx[dir];
                             y += dir_dy[dir];
                         }
-
-                        res_actions.insert(res_actions.end(), all(actions));
                         return true;
                     }
 
-                    q.push(pint(nx, ny));
+                    q.push(pss(nx, ny));
                 }
             }
         }
@@ -499,8 +629,16 @@ private:
     struct Node
     {
         Node(const Board& board, const vector<Action>& actions, int prev_moves, int prev_index)
-            : board(board), actions(actions), prev_moves(prev_moves), prev_index(prev_index)
+            :
+                board(board),
+//                 actions(actions),
+                actions_size(actions.size()),
+                prev_moves(prev_moves),
+                prev_index(prev_index)
         {
+            assert(actions_size < 4);
+            rep(i, actions_size)
+                this->actions[i] = actions[i];
         }
 
         bool operator<(const Node& other) const
@@ -509,7 +647,9 @@ private:
         }
 
         Board board;
-        vector<Action> actions;
+//         vector<Action> actions;
+        Action actions[4];
+        int actions_size;
         int prev_moves;
         int prev_index;
     };
