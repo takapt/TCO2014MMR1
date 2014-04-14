@@ -232,16 +232,37 @@ class Board
 {
 public:
     Board(int colors, const vector<string>& board, vector<int>* buffer)
-        : n(board.size()), colors(colors), buffer(buffer), score(0), buffer_index(0)
+        :
+            n(board.size()),
+            colors(colors),
+            buffer(buffer),
+            score(0),
+            buffer_index(0),
+            same_three_color_rects(0)
     {
         rep(y, n) rep(x, n)
-            this->board[y][x] = board[y][x] - '0';
-        adjust();
+            set(x, y, board[y][x] - '0');
+
+        rep(y, n - 1) rep(x, n - 1)
+            is_same_three[y][x] = false;
+        rep(y, n - 1) rep(x, n - 1)
+            update_same_three(x, y);
+
+        PQ q;
+        rep(y, n - 1) rep(x, n - 1)
+            if (all_same(x, y))
+                q.push(pss(y, x));
+        adjust(q);
     }
 
     int get_score() const
     {
         return score;
+    }
+
+    int get_same_three_color_rects() const
+    {
+        return same_three_color_rects;
     }
 
     int size() const
@@ -258,14 +279,19 @@ public:
 private:
 //     typedef priority_queue<uint, vector<uint>, greater<uint>> PQ;
     typedef PriorityQueue<uint, 16 * 16> PQ;
-    void push_q(int tx, int ty, PQ& q) const
+    void push_q(int tx, int ty, PQ& q)
     {
         rep(i, 4)
         {
             int x = tx - rect_dx[i];
             int y = ty - rect_dy[i];
-            if (in_sq(x, y, n - 1) && all_same(x, y))
-                q.push(pss(y, x));
+
+            if (in_sq(x, y, n - 1))
+            {
+                update_same_three(x, y);
+                if (all_same(x, y))
+                    q.push(pss(y, x));
+            }
         }
     }
     void adjust(PQ& q)
@@ -285,7 +311,7 @@ private:
                     int x = tx + rect_dx[i];
                     int y = ty + rect_dy[i];
                     assert(buffer_index < buffer->size());
-                    board[y][x] = (*buffer)[buffer_index++];
+                    set(x, y, (*buffer)[buffer_index++]);
                 }
 
                 rep(i, 9)
@@ -294,19 +320,16 @@ private:
                     static const int ndy[] = { -1, -1, -1, 0, 0, 0, 1, 1, 1 };
                     int x = tx + ndx[i];
                     int y = ty + ndy[i];
-                    if (in_sq(x, y, n - 1) && all_same(x, y))
-                        q.push(pss(y, x));
+
+                    if (in_sq(x, y, n - 1))
+                    {
+                        update_same_three(x, y);
+                        if (all_same(x, y))
+                            q.push(pss(y, x));
+                    }
                 }
             }
         }
-    }
-    void adjust()
-    {
-        PQ q;
-        rep(y, n - 1) rep(x, n - 1)
-            if (all_same(x, y))
-                q.push(pss(y, x));
-        adjust(q);
     }
 public:
     void move(const Action& action)
@@ -317,7 +340,10 @@ public:
         int y2 = y1 + dir_dy[action.dir];
         assert(in_sq(x1, y1, n));
         assert(in_sq(x2, y2, n));
-        swap(board[y1][x1], board[y2][x2]);
+        int c1 = at(x1, y1);
+        int c2 = at(x2, y2);
+        set(x1, y1, c2);
+        set(x2, y2, c1);
 
         PQ q;
         push_q(x1, y1, q);
@@ -343,7 +369,7 @@ public:
         rep(y, n)
         {
             rep(x, n)
-                res += board[y][x] + '0';
+                res += at(x, y) + '0';
             res += "\n";
         }
         return res;
@@ -380,6 +406,41 @@ private:
         }
         return true;
     }
+
+    void set(int x, int y, int color)
+    {
+        assert(in_sq(x, y, n));
+        assert(0 <= color && color < colors);
+        board[y][x] = color;
+    }
+
+    //
+    int same_three_color_rects;
+    bool is_same_three[16][16];
+    void update_same_three(int tx, int ty)
+    {
+        assert(in_sq(tx, ty, n - 1));
+
+        int num_colors[6];
+        int c[4];
+        rep(i, 4)
+            c[i] = at(tx + rect_dx[i], ty + rect_dy[i]);
+        num_colors[c[0]] = num_colors[c[1]] = 0;
+        rep(i, 4)
+            ++num_colors[c[i]];
+        int max_num = max(num_colors[c[0]], num_colors[c[1]]);
+
+        if (is_same_three[ty][tx])
+        {
+            --same_three_color_rects;
+            is_same_three[ty][tx] = false;
+        }
+        if (max_num >= 3)
+        {
+            ++same_three_color_rects;
+            is_same_three[ty][tx] = true;
+        }
+    }
 };
 
 const int MAX_MOVES = ten(4);
@@ -394,6 +455,8 @@ public:
 
     vector<Action> solve()
     {
+        map<int, int> nexts_log;
+
         vector<Node> stages[MAX_MOVES + 1];
         stages[0].push_back(Node(init_board, vector<Action>(), -1, -1));
 
@@ -417,7 +480,7 @@ public:
 
                 int nexts = 0;
 
-                for (int max_cost = 2; nexts == 0 && max_cost <= 4; ++max_cost)
+                for (int max_cost = 2; nexts == 0 && max_cost <= 3; ++max_cost)
                 {
                     rep(ty, n - 1) rep(tx, n - 1)
                     {
@@ -438,6 +501,7 @@ public:
                             if (solve_actions(tx, ty, color, max_cost, board, actions))
                             {
                                 assert(actions.size() > 0);
+                                assert(actions.size() <= max_cost);
                                 const int next_moves = moves + actions.size();
                                 if (next_moves <= MAX_MOVES)
                                 {
@@ -473,10 +537,14 @@ public:
                             }
                         }
                     }
-NodeEnd:;
                 }
+
+                ++nexts_log[nexts];
             }
         }
+//         for (pint it : nexts_log)
+//             fprintf(stderr, "%3d: %d\n", it.first, it.second);
+//         dump((n - 1) * (n - 1));
 
         int best_score = -1, best_moves, best_index;
         rep(moves, MAX_MOVES + 1) rep(i, stages[moves].size())
@@ -490,6 +558,8 @@ NodeEnd:;
             }
         }
         assert(best_score >= 0);
+
+        map<int, int> act_num;
         vector<Action> actions;
         for (int moves = best_moves, index = best_index; moves > 0; )
         {
@@ -500,7 +570,11 @@ NodeEnd:;
 
             moves = node.prev_moves;
             index = node.prev_index;
+
+            ++act_num[node.actions_size];
         }
+        for (auto it : act_num)
+            fprintf(stderr, "%d: %d\n", it.first, it.second);
         reverse(all(actions));
         while (actions.size() < MAX_MOVES)
             actions.push_back(Action(0, 0, RIGHT));
@@ -538,9 +612,6 @@ private:
             const int sx = tx + rect_dx[i];
             const int sy = ty + rect_dy[i];
 
-            if (res_actions.size() + diffs > max_cost)
-                return false;
-
             if (fixed[sy][sx])
                 continue;
 
@@ -554,13 +625,16 @@ private:
                 board.move(a);
                 res_actions.push_back(a);
                 if (board.get_score() > ori_score)
-                    return true;
+                    return res_actions.size() <= max_cost;
             }
             if (board.at(sx, sy) != color)
                 return false;
 
             fixed[sy][sx] = true;
             --diffs;
+
+            if (res_actions.size() + diffs > max_cost)
+                return false;
         }
         return true;
     }
@@ -626,32 +700,40 @@ private:
     const int n;
     const int colors;
 
+
     struct Node
     {
         Node(const Board& board, const vector<Action>& actions, int prev_moves, int prev_index)
             :
                 board(board),
-//                 actions(actions),
                 actions_size(actions.size()),
                 prev_moves(prev_moves),
                 prev_index(prev_index)
         {
-            assert(actions_size < 4);
+            assert(actions_size <= 4);
             rep(i, actions_size)
                 this->actions[i] = actions[i];
+
+            score = eval_board();
         }
 
         bool operator<(const Node& other) const
         {
-            return board.get_score() > other.board.get_score();
+            return score > other.score;
         }
 
         Board board;
-//         vector<Action> actions;
         Action actions[4];
         int actions_size;
         int prev_moves;
         int prev_index;
+
+    private:
+        int eval_board()
+        {
+            return board.get_score() * 4 + board.get_same_three_color_rects();
+        }
+        int score;
     };
 };
 
