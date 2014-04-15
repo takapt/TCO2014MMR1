@@ -228,6 +228,9 @@ public:
 const int rect_dx[] = { 0, 1, 0, 1 };
 const int rect_dy[] = { 0, 0, 1, 1 };
 
+const int color_bits = 4;
+const ull color_mask = (1 << color_bits) - 1;
+const ull double_color_mask = (1 << (2 * color_bits)) - 1;
 class Board
 {
 public:
@@ -240,6 +243,9 @@ public:
             buffer_index(0),
             same_three_color_rects(0)
     {
+        rep(y, 16)
+            this->board[y] = 0;
+
         rep(y, n) rep(x, n)
             set(x, y, board[y][x] - '0');
 
@@ -273,7 +279,7 @@ public:
     int at(int x, int y) const
     {
         assert(in_sq(x, y, n));
-        return board[y][x];
+        return (board[y] >> (color_bits * x)) & color_mask;
     }
 
 private:
@@ -314,18 +320,19 @@ private:
                     set(x, y, (*buffer)[buffer_index++]);
                 }
 
-                rep(i, 9)
+                for (int dy = -1; dy <= 1; ++dy)
                 {
-                    static const int ndx[] = { -1, 0, 1, -1, 0, 1, -1, 0, 1 };
-                    static const int ndy[] = { -1, -1, -1, 0, 0, 0, 1, 1, 1 };
-                    int x = tx + ndx[i];
-                    int y = ty + ndy[i];
-
-                    if (in_sq(x, y, n - 1))
+                    for (int dx = -1; dx <= 1; ++dx)
                     {
-                        update_same_three(x, y);
-                        if (all_same(x, y))
-                            q.push(pss(y, x));
+                        int x = tx + dx;
+                        int y = ty + dy;
+
+                        if (in_sq(x, y, n - 1))
+                        {
+                            update_same_three(x, y);
+                            if (all_same(x, y))
+                                q.push(pss(y, x));
+                        }
                     }
                 }
             }
@@ -356,8 +363,8 @@ public:
         if (buffer_index!= other.buffer_index)
             return false;
 
-        rep(y, n) rep(x, n)
-            if (at(x, y) != other.at(x, y))
+        rep(y, n)
+            if (board[y] != other.board[y])
                 return false;
 
         return true;
@@ -390,28 +397,27 @@ private:
     vector<int>* buffer;
     int buffer_index;
 
-    int board[16][16];
+    ull board[16];
     int score;
 
     bool all_same(int tx, int ty) const
     {
-        int c = at(tx, ty);
-        rep(i, 4)
-        {
-            int x = tx + rect_dx[i];
-            int y = ty + rect_dy[i];
-            assert(in_sq(x, y, n));
-            if (at(x, y) != c)
-                return false;
-        }
-        return true;
+        assert(in_sq(tx, ty, n - 1));
+        ull a = (board[ty] >> (color_bits * tx)) & double_color_mask;
+        ull b = (board[ty + 1] >> (color_bits * tx)) & double_color_mask;
+        if (a != b)
+            return false;
+        ull c0 = a & color_mask;
+        ull c1 = (a >> color_bits) & color_mask;
+        return c0 == c1;
     }
 
     void set(int x, int y, int color)
     {
         assert(in_sq(x, y, n));
         assert(0 <= color && color < colors);
-        board[y][x] = color;
+        board[y] = (board[y] & ~(color_mask << (color_bits * x))) | (ull(color) << (color_bits * x));
+        assert(at(x, y) == color);
     }
 
     //
@@ -455,12 +461,12 @@ public:
 
     vector<Action> solve()
     {
-        map<int, int> nexts_log;
+//         map<int, int> nexts_log;
 
         vector<Node> stages[MAX_MOVES + 1];
         stages[0].push_back(Node(init_board, vector<Action>(), -1, -1));
 
-        const int beam_width = 12 * 16 * 16 / (max(10, n) * max(10, n));
+        const int beam_width = 11 * 15 * 15 / (max(10, n) * max(10, n));
         rep(moves, MAX_MOVES)
         {
             auto& stage = stages[moves];
@@ -539,7 +545,7 @@ public:
                     }
                 }
 
-                ++nexts_log[nexts];
+//                 ++nexts_log[nexts];
             }
         }
 //         for (pint it : nexts_log)
@@ -573,8 +579,8 @@ public:
 
             ++act_num[node.actions_size];
         }
-        for (auto it : act_num)
-            fprintf(stderr, "%d: %d\n", it.first, it.second);
+//         for (auto it : act_num)
+//             fprintf(stderr, "%d: %d\n", it.first, it.second);
         reverse(all(actions));
         while (actions.size() < MAX_MOVES)
             actions.push_back(Action(0, 0, RIGHT));
