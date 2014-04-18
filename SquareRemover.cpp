@@ -26,6 +26,7 @@
 #include <iomanip>
 #include <fstream>
 #include <bitset>
+#include <unordered_set>
 
 
 using namespace std;
@@ -193,6 +194,64 @@ private:
             k = next;
         }
     }
+};
+
+#ifdef _MSC_VER
+#include <Windows.h>
+#else
+#include <sys/time.h>
+#endif
+class Timer
+{
+    typedef double time_type;
+    typedef unsigned int skip_type;
+
+private:
+    time_type start_time;
+    time_type elapsed;
+
+#ifdef _MSC_VER
+    time_type get_ms() { return (time_type)GetTickCount64() / 1000; }
+#else
+    time_type get_ms() { struct timeval t; gettimeofday(&t, NULL); return (time_type)t.tv_sec * 1000 + (time_type)t.tv_usec / 1000; }
+#endif
+
+public:
+    Timer() {}
+
+    void start() { start_time = get_ms(); }
+    time_type get_elapsed() { return elapsed = get_ms() - start_time; }
+};
+
+class TimeCounter
+{
+public:
+    TimeCounter(int n)
+        : n(n), sum(0)
+    {
+    }
+
+    void add(double t)
+    {
+        if (q.size() == n)
+        {
+            sum -= q.front();
+            q.pop_front();
+        }
+        sum += t;
+        q.push_back(t);
+    }
+
+    double average() const
+    {
+        assert(!q.empty());
+        return sum / q.size();
+    }
+
+private:
+    int n;
+    deque<double> q;
+    double sum;
 };
 
 ///
@@ -382,12 +441,24 @@ public:
         return res;
     }
 
+
+    int dist(const Board& other) const
+    {
+        int d = 0;
+        rep(y, n) rep(x, n)
+            if (at(x, y) != other.at(x, y))
+                ++d;
+        if (buffer_index != other.buffer_index)
+            d += 2;
+        return d;
+    }
+
     ull hash() const
     {
         const ull base = ten(9) + 7;
-        ull h = 0;
-        rep(y, n) rep(x, n)
-            h = h * base + at(x, y);
+        ull h = buffer_index;
+        rep(y, n)
+            h = h * base + board[y];
         return h;
     }
 
@@ -449,7 +520,9 @@ private:
     }
 };
 
+
 const int MAX_MOVES = ten(4);
+const int MAX_COST = 3;
 
 class Solver
 {
@@ -461,18 +534,38 @@ public:
 
     vector<Action> solve()
     {
-//         map<int, int> nexts_log;
-
         vector<Node> stages[MAX_MOVES + 1];
-        stages[0].push_back(Node(init_board, vector<Action>(), -1, -1));
+        priority_queue<Node> stage_qs[MAX_MOVES + 1];
+        unordered_set<ull> pushed_board_hash[MAX_MOVES + 1];
+        stage_qs[0].push(Node(init_board, vector<Action>(), -1, -1));
 
-        const int beam_width = 11 * 15 * 15 / (max(10, n) * max(10, n));
+#ifdef LOCAL
+        const double GLOBAL_TLE = 9 * 1000;
+#else
+        const double GLOBAL_TLE = 29.7 * 1000;
+#endif
+
+        Timer g_timer;
+        g_timer.start();
+        TimeCounter time_counter(100);
+        int beam_width = 11 * 15 * 15 / (max(10, n) * max(10, n));
+        dump(beam_width);
         rep(moves, MAX_MOVES)
         {
-            auto& stage = stages[moves];
-            if (stage.empty())
-                continue;
+            pushed_board_hash[moves].clear();
 
+            auto& stage = stages[moves];
+            auto& stage_q = stage_qs[moves];
+            assert(stage.empty());
+
+            while (stage_q.size() > beam_width)
+                stage_q.pop();
+            while (!stage_q.empty())
+            {
+                stage.push_back(stage_q.top());
+                stage_q.pop();
+            }
+            stage_q = priority_queue<Node>();
 //             vector<int> scores;
 //             for (Node& node : stage)
 //                 scores.push_back(node.board.get_score());
@@ -480,17 +573,24 @@ public:
 //             fprintf(stderr, "%5d: %d\n", moves, stage.size());
 //             cerr << scores << endl;
 
-            rep(node_i, stage.size())
+            const double start_t = g_timer.get_elapsed();
+            for (int node_i = sz(stage) - 1; node_i >= 0; --node_i)
             {
+                if (g_timer.get_elapsed() > GLOBAL_TLE)
+                {
+                    cerr << "bad time adjusting" << endl;
+                    goto End;
+                }
+
                 const Node& node = stage[node_i];
 
                 int nexts = 0;
-
-                for (int max_cost = 2; nexts == 0 && max_cost <= 3; ++max_cost)
+                for (int max_cost = 2; nexts == 0 && max_cost <= MAX_COST; ++max_cost)
                 {
                     rep(ty, n - 1) rep(tx, n - 1)
                     {
-                        int num_colors[6] = {};
+                        int num_colors[6];
+                        fill_n(num_colors, colors, 0);
                         rep(i, 4)
                             ++num_colors[node.board.at(tx + rect_dx[i], ty + rect_dy[i])];
                         static vector<int> use_colors;
@@ -509,48 +609,42 @@ public:
                                 assert(actions.size() > 0);
                                 assert(actions.size() <= max_cost);
                                 const int next_moves = moves + actions.size();
-                                if (next_moves <= MAX_MOVES)
+                                Node next_node(board, actions, moves, node_i);
+                                const ull board_hash = board.hash();
+                                if (next_moves <= MAX_MOVES && (stage_qs[next_moves].size() < beam_width || next_node < stage_qs[next_moves].top()) && !pushed_board_hash[next_moves].count(board_hash))
                                 {
-                                    bool diff_state = true;
-                                    for (Node& no : stages[next_moves])
-                                    {
-                                        if (board == no.board)
-                                        {
-                                            diff_state = false;
-                                            break;
-                                        }
-                                    }
-                                    if (diff_state)
-                                    {
-                                        Node next_node(board, actions, moves, node_i);
-                                        if (stages[next_moves].size() == beam_width)
-                                        {
-                                            rep(i, stages[next_moves].size())
-                                            {
-                                                if (next_node < stages[next_moves][i])
-                                                {
-                                                    stages[next_moves][i] = next_node;
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                        else
-                                            stages[next_moves].push_back(next_node);
+                                    pushed_board_hash[next_moves].insert(board_hash);
+                                    stage_qs[next_moves].push(next_node);
 
-                                        ++nexts;
-                                    }
+                                    ++nexts;
                                 }
                             }
                         }
                     }
                 }
+            }
+            if (moves + 1 == MAX_MOVES)
+                break;
 
-//                 ++nexts_log[nexts];
+            double cur_t = g_timer.get_elapsed();
+            double taken_t = cur_t - start_t;
+            time_counter.add(taken_t / beam_width);
+            double ave_one_beam_t = time_counter.average();
+            double remain_t = GLOBAL_TLE * 0.985 - cur_t;
+            double one_move_t = remain_t / (MAX_MOVES - (moves + 1));
+            int good_beam_width = max<int>(1, one_move_t / ave_one_beam_t);
+            static int last_changed = 10;
+            if (moves - last_changed >= 3 && abs(beam_width - good_beam_width) >= 2)
+            {
+                last_changed = moves;
+                if (good_beam_width > beam_width)
+                    ++beam_width;
+                else
+                    --beam_width;
             }
         }
-//         for (pint it : nexts_log)
-//             fprintf(stderr, "%3d: %d\n", it.first, it.second);
-//         dump((n - 1) * (n - 1));
+End:
+        ;
 
         int best_score = -1, best_moves, best_index;
         rep(moves, MAX_MOVES + 1) rep(i, stages[moves].size())
@@ -565,7 +659,6 @@ public:
         }
         assert(best_score >= 0);
 
-        map<int, int> act_num;
         vector<Action> actions;
         for (int moves = best_moves, index = best_index; moves > 0; )
         {
@@ -576,11 +669,48 @@ public:
 
             moves = node.prev_moves;
             index = node.prev_index;
-
-            ++act_num[node.actions_size];
         }
-//         for (auto it : act_num)
-//             fprintf(stderr, "%d: %d\n", it.first, it.second);
+
+#if 0
+        int zeros = 0;
+        double sum_ave = 0;
+        rep(moves, MAX_MOVES)
+        {
+            vector<Node>& stage = stages[moves];
+//             cerr << stage.size() << endl;
+//             for (Node& node : stage)
+//             {
+//                 dump(node.get_score());
+//                 cerr << node.board.to_s() << endl;
+//             }
+            if (stage.size() <= 1)
+            {
+                ++zeros;
+                continue;
+            }
+
+            vector<int> diffs;
+            rep(j, stage.size()) rep(i, j)
+            {
+//                 assert(stage[i].board == stage[j].board);
+                int diff_cells = 0;
+                rep(y, n) rep(x, n)
+                    if (stage[i].board.at(x, y) != stage[j].board.at(x, y))
+                        ++diff_cells;
+                diffs.push_back(diff_cells);
+            }
+            double ave = accumulate(all(diffs), 0LL) / diffs.size();
+//             dump(ave);
+//             fprintf(stderr, "%5d: %.3f\n", moves, ave);
+//             sort(all(diffs));
+//             dump(diffs);
+            sum_ave += ave;
+        }
+        double aveave = sum_ave / (MAX_MOVES - zeros);
+        dump(aveave);
+        dump(zeros);
+#endif
+
         reverse(all(actions));
         while (actions.size() < MAX_MOVES)
             actions.push_back(Action(0, 0, RIGHT));
@@ -716,7 +846,7 @@ private:
                 prev_moves(prev_moves),
                 prev_index(prev_index)
         {
-            assert(actions_size <= 4);
+            assert(actions_size <= MAX_COST);
             rep(i, actions_size)
                 this->actions[i] = actions[i];
 
@@ -729,10 +859,15 @@ private:
         }
 
         Board board;
-        Action actions[4];
+        Action actions[MAX_COST];
         int actions_size;
         int prev_moves;
         int prev_index;
+
+        int get_score() const
+        {
+            return score;
+        }
 
     private:
         int eval_board()
