@@ -77,6 +77,18 @@ ushort pss_second(uint pair) { return pair & 0xffff; }
 uchar pcc_first(ushort pair) { return pair >> 8; }
 uchar pcc_second(ushort pair) { return pair & 0xff; }
 
+uchar encode_pos(int x, int y)
+{
+    assert(0 <= x && x < 16);
+    assert(0 <= y && y < 16);
+    return x | (y << 4);
+}
+uchar decode_pos(uchar pos, int& x, int& y)
+{
+    x = pos & 0xf;
+    y = (pos >> 4) & 0xf;
+}
+
 
 template <typename T, int SIZE>
 class Queue
@@ -117,7 +129,7 @@ private:
     T data[SIZE];
     int front_p, back_p;
 };
-template <typename T, int SIZE>
+template <typename T, int SIZE, typename CMP = less<T> >
 class PriorityQueue
 {
 public:
@@ -163,12 +175,17 @@ private:
     T data[SIZE];
     int n;
 
+    bool cmp(const T& a, const T& b) const
+    {
+        return CMP()(a, b);
+    }
+
     void up(int k)
     {
         while (k > 0)
         {
             int par = (k - 1) / 2;
-            if (!(data[k] < data[par]))
+            if (!cmp(data[k], data[par]))
                 break;
 
             swap(data[k], data[par]);
@@ -182,9 +199,9 @@ private:
         {
             int next = k;
             int a = 2 * k + 1, b = 2 * k + 2;
-            if (a < n && data[a] < data[next])
+            if (a < n && cmp(data[a], data[next]))
                 next = a;
-            if (b < n && data[b] < data[next])
+            if (b < n && cmp(data[b], data[next]))
                 next = b;
 
             if (next == k)
@@ -289,7 +306,28 @@ const int rect_dy[] = { 0, 0, 1, 1 };
 
 const int color_bits = 4;
 const ull color_mask = (1 << color_bits) - 1;
-const ull double_color_mask = (1 << (2 * color_bits)) - 1;
+const ull two_color_mask = (1 << (2 * color_bits)) - 1;
+const ull four_color_mask = (1 << (4 * color_bits)) - 1;
+
+
+bool same_three_color_table[1 << (4 * color_bits)];
+int pack_four_colors(int a, int b, int c, int d)
+{
+    return a | (b << color_bits) | (c << (2 * color_bits)) | (d << (3 * color_bits));
+}
+void init_same_three_color_table()
+{
+    rep(a, 6) rep(b, 6) rep(c, 6) rep(d, 6)
+    {
+        int num[6] = {};
+        ++num[a];
+        ++num[b];
+        ++num[c];
+        ++num[d];
+        int max_num = *max_element(num, num + 6);
+        same_three_color_table[pack_four_colors(a, b, c, d)] = max_num >= 3;
+    }
+}
 class Board
 {
 public:
@@ -309,8 +347,6 @@ public:
             set(x, y, board[y][x] - '0');
 
         rep(y, n - 1) rep(x, n - 1)
-            is_same_three[y][x] = false;
-        rep(y, n - 1) rep(x, n - 1)
             update_same_three(x, y);
 
         PQ q;
@@ -319,6 +355,8 @@ public:
                 q.push(pss(y, x));
         adjust(q);
     }
+    Board(){}
+
 
     int get_score() const
     {
@@ -342,7 +380,6 @@ public:
     }
 
 private:
-//     typedef priority_queue<uint, vector<uint>, greater<uint>> PQ;
     typedef PriorityQueue<uint, 16 * 16> PQ;
     void push_q(int tx, int ty, PQ& q)
     {
@@ -441,24 +478,41 @@ public:
         return res;
     }
 
-
-    int dist(const Board& other) const
-    {
-        int d = 0;
-        rep(y, n) rep(x, n)
-            if (at(x, y) != other.at(x, y))
-                ++d;
-        if (buffer_index != other.buffer_index)
-            d += 2;
-        return d;
-    }
-
     ull hash() const
     {
         const ull base = ten(9) + 7;
         ull h = buffer_index;
         rep(y, n)
             h = h * base + board[y];
+        return h;
+    }
+
+private:
+    ull four_color(int x, int y) const
+    {
+        if (y == -1)
+            return 1919817;
+        else if (y == n)
+            return 114517;
+
+        assert(0 <= y && y < n);
+
+        if (x == -1)
+            return ((board[y] << color_bits) & four_color_mask) | 7;
+//         else if (x == n - 3)
+//             return ((board[y] >> (color_bits * (n - 3))) & four_color_mask) | (9 << (3 * color_bits));
+        else
+            return (board[y] >> (color_bits * x)) & four_color_mask;
+    }
+public:
+    ull sub_hash(int tx, int ty) const
+    {
+        assert(in_sq(tx, ty, n - 1));
+
+        const ull base = ten(9) + 7;
+        ull h = 0;
+        for (int y = ty - 1; y <= ty + 2; ++y)
+            h = h * base + four_color(tx - 1, y);
         return h;
     }
 
@@ -474,12 +528,12 @@ private:
     bool all_same(int tx, int ty) const
     {
         assert(in_sq(tx, ty, n - 1));
-        ull a = (board[ty] >> (color_bits * tx)) & double_color_mask;
-        ull b = (board[ty + 1] >> (color_bits * tx)) & double_color_mask;
+        int a = two_color(tx, ty);
+        int b = two_color(tx, ty + 1);
         if (a != b)
             return false;
-        ull c0 = a & color_mask;
-        ull c1 = (a >> color_bits) & color_mask;
+        int c0 = a & color_mask;
+        int c1 = (a >> color_bits) & color_mask;
         return c0 == c1;
     }
 
@@ -491,31 +545,32 @@ private:
         assert(at(x, y) == color);
     }
 
+    int two_color(int x, int y) const
+    {
+        assert(0 <= x && x < n - 1);
+        assert(0 <= y && y < n);
+        return (board[y] >> (color_bits * x)) & two_color_mask;
+    }
+
     //
     int same_three_color_rects;
-    bool is_same_three[16][16];
+    bitset<256> is_same_three; 
     void update_same_three(int tx, int ty)
     {
         assert(in_sq(tx, ty, n - 1));
 
-        int num_colors[6];
-        int c[4];
-        rep(i, 4)
-            c[i] = at(tx + rect_dx[i], ty + rect_dy[i]);
-        num_colors[c[0]] = num_colors[c[1]] = 0;
-        rep(i, 4)
-            ++num_colors[c[i]];
-        int max_num = max(num_colors[c[0]], num_colors[c[1]]);
-
-        if (is_same_three[ty][tx])
+        const uchar tpos = encode_pos(tx, ty);
+        if (is_same_three[tpos])
         {
             --same_three_color_rects;
-            is_same_three[ty][tx] = false;
+            is_same_three.flip(tpos);
         }
-        if (max_num >= 3)
+
+        int packed = two_color(tx, ty) | (two_color(tx, ty + 1) << (2 * color_bits));
+        if (same_three_color_table[packed])
         {
             ++same_three_color_rects;
-            is_same_three[ty][tx] = true;
+            is_same_three.flip(tpos);
         }
     }
 };
@@ -523,6 +578,7 @@ private:
 
 const int MAX_MOVES = ten(4);
 const int MAX_COST = 3;
+const int NUM_Q = 4;
 
 class Solver
 {
@@ -534,28 +590,37 @@ public:
 
     vector<Action> solve()
     {
-        vector<Node> stages[MAX_MOVES + 1];
-        priority_queue<Node> stage_qs[MAX_MOVES + 1];
-        unordered_set<ull> pushed_board_hash[MAX_MOVES + 1];
-        stage_qs[0].push(Node(init_board, vector<Action>(), -1, -1));
+// #define USE_TIMER
 
 #ifdef LOCAL
+#ifdef USE_TIMER
         const double GLOBAL_TLE = 9 * 1000;
 #else
-        const double GLOBAL_TLE = 29.7 * 1000;
+        const double GLOBAL_TLE = 1e9 * 9 * 1000;
+#endif
+#else
+        const double GLOBAL_TLE = 29.9 * 1000;
 #endif
 
         Timer g_timer;
         g_timer.start();
+
+        vector<Node> stages[MAX_MOVES + 1];
+
+        priority_queue<Node> stage_qs[NUM_Q];
+        unordered_set<ull> pushed_board_hash[NUM_Q];
+        stage_qs[0].push(Node(init_board, vector<Action>(), -1, -1));
+
+
         TimeCounter time_counter(100);
-        int beam_width = 11 * 15 * 15 / (max(10, n) * max(10, n));
-        dump(beam_width);
+        unordered_set<ull> ignore(4 * ten(5));
+        int beam_width = 21 * 15 * 15 / (max(10, n) * max(10, n));
         rep(moves, MAX_MOVES)
         {
-            pushed_board_hash[moves].clear();
+            pushed_board_hash[moves % NUM_Q].clear();
 
             auto& stage = stages[moves];
-            auto& stage_q = stage_qs[moves];
+            auto& stage_q = stage_qs[moves % NUM_Q];
             assert(stage.empty());
 
             while (stage_q.size() > beam_width)
@@ -565,13 +630,15 @@ public:
                 stage.push_back(stage_q.top());
                 stage_q.pop();
             }
-            stage_q = priority_queue<Node>();
-//             vector<int> scores;
-//             for (Node& node : stage)
-//                 scores.push_back(node.board.get_score());
-//             sort(all(scores));
-//             fprintf(stderr, "%5d: %d\n", moves, stage.size());
-//             cerr << scores << endl;
+
+#if 0
+            vector<int> scores;
+            for (Node& node : stage)
+                scores.push_back(node.board.get_score());
+            sort(all(scores));
+            fprintf(stderr, "%5d: %d\n", moves, stage.size());
+            cerr << scores << endl;
+#endif
 
             const double start_t = g_timer.get_elapsed();
             for (int node_i = sz(stage) - 1; node_i >= 0; --node_i)
@@ -589,6 +656,11 @@ public:
                 {
                     rep(ty, n - 1) rep(tx, n - 1)
                     {
+                        const ull base = ten(9) + 9;
+                        const ull sub_hash = node.board.sub_hash(tx, ty) * base + max_cost;
+                        if (ignore.count(sub_hash))
+                            continue;
+
                         int num_colors[6];
                         fill_n(num_colors, colors, 0);
                         rep(i, 4)
@@ -596,7 +668,7 @@ public:
                         static vector<int> use_colors;
                         use_colors.clear();
                         rep(color, colors)
-                            if (num_colors[color] >= (4 - max_cost))
+                            if (num_colors[color] >= 2)
                                 use_colors.push_back(color);
 
                         for (int color : use_colors)
@@ -609,15 +681,26 @@ public:
                                 assert(actions.size() > 0);
                                 assert(actions.size() <= max_cost);
                                 const int next_moves = moves + actions.size();
+                                auto& next_q = stage_qs[next_moves % NUM_Q];
+                                auto& next_hash = pushed_board_hash[next_moves % NUM_Q];
                                 Node next_node(board, actions, moves, node_i);
-                                const ull board_hash = board.hash();
-                                if (next_moves <= MAX_MOVES && (stage_qs[next_moves].size() < beam_width || next_node < stage_qs[next_moves].top()) && !pushed_board_hash[next_moves].count(board_hash))
+                                if (next_moves <= MAX_MOVES && (next_q.size() < beam_width || next_node < next_q.top()))
                                 {
-                                    pushed_board_hash[next_moves].insert(board_hash);
-                                    stage_qs[next_moves].push(next_node);
+                                    const ull board_hash = board.hash();
+                                    if (!next_hash.count(board_hash))
+                                    {
+                                        next_hash.insert(board_hash);
+                                        next_q.push(next_node);
 
-                                    ++nexts;
+                                        ++nexts;
+                                    }
                                 }
+                            }
+                            else
+                            {
+                                if (ignore.size() % ten(5) == 0)
+                                    ignore.clear();
+                                ignore.insert(sub_hash);
                             }
                         }
                     }
@@ -626,11 +709,12 @@ public:
             if (moves + 1 == MAX_MOVES)
                 break;
 
+#ifdef USE_TIMER
             double cur_t = g_timer.get_elapsed();
             double taken_t = cur_t - start_t;
             time_counter.add(taken_t / beam_width);
             double ave_one_beam_t = time_counter.average();
-            double remain_t = GLOBAL_TLE * 0.985 - cur_t;
+            double remain_t = GLOBAL_TLE * 0.99 - cur_t;
             double one_move_t = remain_t / (MAX_MOVES - (moves + 1));
             int good_beam_width = max<int>(1, one_move_t / ave_one_beam_t);
             static int last_changed = 10;
@@ -642,6 +726,7 @@ public:
                 else
                     --beam_width;
             }
+#endif
         }
 End:
         ;
@@ -671,46 +756,6 @@ End:
             index = node.prev_index;
         }
 
-#if 0
-        int zeros = 0;
-        double sum_ave = 0;
-        rep(moves, MAX_MOVES)
-        {
-            vector<Node>& stage = stages[moves];
-//             cerr << stage.size() << endl;
-//             for (Node& node : stage)
-//             {
-//                 dump(node.get_score());
-//                 cerr << node.board.to_s() << endl;
-//             }
-            if (stage.size() <= 1)
-            {
-                ++zeros;
-                continue;
-            }
-
-            vector<int> diffs;
-            rep(j, stage.size()) rep(i, j)
-            {
-//                 assert(stage[i].board == stage[j].board);
-                int diff_cells = 0;
-                rep(y, n) rep(x, n)
-                    if (stage[i].board.at(x, y) != stage[j].board.at(x, y))
-                        ++diff_cells;
-                diffs.push_back(diff_cells);
-            }
-            double ave = accumulate(all(diffs), 0LL) / diffs.size();
-//             dump(ave);
-//             fprintf(stderr, "%5d: %.3f\n", moves, ave);
-//             sort(all(diffs));
-//             dump(diffs);
-            sum_ave += ave;
-        }
-        double aveave = sum_ave / (MAX_MOVES - zeros);
-        dump(aveave);
-        dump(zeros);
-#endif
-
         reverse(all(actions));
         while (actions.size() < MAX_MOVES)
             actions.push_back(Action(0, 0, RIGHT));
@@ -725,10 +770,7 @@ private:
 
         res_actions.clear();
 
-        bool fixed[16][16];
-        for (int y = max(0, ty - max_cost); y <= min(n - 1, ty + max_cost); ++y)
-            for (int x = max(0, tx - max_cost); x <= min(n - 1, tx + max_cost); ++x)
-                fixed[y][x] = false;
+        bitset<256> fixed;
 
         int diffs = 4;
         rep(i, 4)
@@ -737,7 +779,7 @@ private:
             int sy = ty + rect_dy[i];
             if (board.at(sx, sy) == color)
             {
-                fixed[sy][sx] = true;
+                fixed.set(encode_pos(sx, sy));
                 --diffs;
             }
         }
@@ -747,8 +789,9 @@ private:
         {
             const int sx = tx + rect_dx[i];
             const int sy = ty + rect_dy[i];
+            const uchar spos = encode_pos(sx, sy);
 
-            if (fixed[sy][sx])
+            if (fixed[spos])
                 continue;
 
             static vector<Action> acts;
@@ -766,7 +809,7 @@ private:
             if (board.at(sx, sy) != color)
                 return false;
 
-            fixed[sy][sx] = true;
+            fixed.set(spos);
             --diffs;
 
             if (res_actions.size() + diffs > max_cost)
@@ -774,30 +817,28 @@ private:
         }
         return true;
     }
-    bool solve_min_actions(const Board& board, int sx, int sy, int color, const bool fixed[16][16], int max_cost, vector<Action>& res_actions)
+    bool solve_min_actions(const Board& board, int sx, int sy, int color, const bitset<256>& fixed, int max_cost, vector<Action>& res_actions)
     {
         assert(in_sq(sx, sy, n));
 
         if (board.at(sx, sy) == color)
             return true;
 
-        const int inf = ten(7);
-        int cost[16][16];
-        Dir used_dir[16][16];
-        for (int y = max(0, sy - max_cost); y <= min(n - 1, sy + max_cost); ++y)
-            for (int x = max(0, sx - max_cost); x <= min(n - 1, sx + max_cost); ++x)
-                cost[y][x] = inf;
+        bitset<256> visit;
+        Dir used_dir[256];
 
         Queue<uint, 16 * 16> q;
-        cost[sy][sx] = 0;
-        q.push(pss(sx, sy));
+        uchar start_pos = encode_pos(sx, sy);
+        visit.set(start_pos);
+        q.push(pss(start_pos, 0));
         while (!q.empty())
         {
-            const int cx = pss_first(q.front());
-            const int cy = pss_second(q.front());
+            int cx, cy;
+            decode_pos(pss_first(q.front()), cx, cy);
+            const int cost = pss_second(q.front());
             q.pop();
 
-            const int ncost = cost[cy][cx] + 1;
+            const int ncost = cost + 1;
             if (ncost > max_cost)
                 continue;
 
@@ -805,17 +846,18 @@ private:
             {
                 int nx = cx + dir_dx[dir];
                 int ny = cy + dir_dy[dir];
-                if (in_sq(nx, ny, n) && !fixed[ny][nx] && ncost < cost[ny][nx])
+                uchar npos = encode_pos(nx, ny);
+                if (in_sq(nx, ny, n) && !fixed[npos] && !visit[npos])
                 {
-                    cost[ny][nx] = ncost;
-                    used_dir[ny][nx] = Dir(dir);
+                    visit.set(npos);
+                    used_dir[npos] = Dir(dir);
 
                     if (board.at(nx, ny) == color)
                     {
-                        for (int x = nx, y = ny; cost[y][x] > 0; )
+                        for (int x = nx, y = ny; x != sx || y != sy; )
                         {
-                            assert(cost[y][x] < inf);
-                            Dir dir = rev_dir(used_dir[y][x]);
+                            assert(visit[encode_pos(x, y)]);
+                            Dir dir = rev_dir(used_dir[encode_pos(x, y)]);
                             res_actions.push_back(Action(x, y, dir));
 
                             x += dir_dx[dir];
@@ -824,7 +866,7 @@ private:
                         return true;
                     }
 
-                    q.push(pss(nx, ny));
+                    q.push(pss(npos, ncost));
                 }
             }
         }
@@ -858,6 +900,11 @@ private:
             return score > other.score;
         }
 
+        bool operator>(const Node& other) const
+        {
+            return score < other.score;
+        }
+
         Board board;
         Action actions[MAX_COST];
         int actions_size;
@@ -883,6 +930,8 @@ class SquareRemover
 public:
     vector<int> playIt(int colors, vector<string> _board, int startSeed)
     {
+        init_same_three_color_table();
+
         vector<int> buffer = make_buffer(startSeed, colors);
         Board board(colors, _board, &buffer);
 
