@@ -580,6 +580,53 @@ const int MAX_MOVES = ten(4);
 const int MAX_COST = 3;
 const int NUM_Q = 4;
 
+struct Node
+{
+    Node(const Board& board, const vector<Action>& actions, int prev_moves, int prev_index)
+        :
+            board(board),
+            actions_size(actions.size()),
+            prev_moves(prev_moves),
+            prev_index(prev_index)
+    {
+        assert(actions_size <= MAX_COST);
+        rep(i, actions_size)
+            this->actions[i] = actions[i];
+
+        score = eval_board();
+    }
+
+    bool operator<(const Node& other) const
+    {
+        return score > other.score;
+    }
+
+    Board board;
+    Action actions[MAX_COST];
+    int actions_size;
+    int prev_moves;
+    int prev_index;
+
+    int get_score() const
+    {
+        return score;
+    }
+
+private:
+    int eval_board()
+    {
+        return board.get_score() * 4 + board.get_same_three_color_rects();
+    }
+    int score;
+};
+struct NodePointerCmp
+{
+    bool operator()(const Node* a, const Node* b) const
+    {
+        return a->get_score() > b->get_score();
+    }
+};
+
 class Solver
 {
 public:
@@ -590,7 +637,7 @@ public:
 
     vector<Action> solve()
     {
-// #define USE_TIMER
+#define USE_TIMER
 
 #ifdef LOCAL
 #ifdef USE_TIMER
@@ -607,9 +654,9 @@ public:
 
         vector<Node> stages[MAX_MOVES + 1];
 
-        priority_queue<Node> stage_qs[NUM_Q];
+        priority_queue<Node*, vector<Node*>, NodePointerCmp> stage_qs[NUM_Q];
         unordered_set<ull> pushed_board_hash[NUM_Q];
-        stage_qs[0].push(Node(init_board, vector<Action>(), -1, -1));
+        stage_qs[0].push(new Node(init_board, vector<Action>(), -1, -1));
 
 
         TimeCounter time_counter(100);
@@ -624,10 +671,14 @@ public:
             assert(stage.empty());
 
             while (stage_q.size() > beam_width)
+            {
+                delete stage_q.top();
                 stage_q.pop();
+            }
             while (!stage_q.empty())
             {
-                stage.push_back(stage_q.top());
+                stage.push_back(*stage_q.top());
+                delete stage_q.top();
                 stage_q.pop();
             }
 
@@ -683,8 +734,10 @@ public:
                                 const int next_moves = moves + actions.size();
                                 auto& next_q = stage_qs[next_moves % NUM_Q];
                                 auto& next_hash = pushed_board_hash[next_moves % NUM_Q];
-                                Node next_node(board, actions, moves, node_i);
-                                if (next_moves <= MAX_MOVES && (next_q.size() < beam_width || next_node < next_q.top()))
+                                Node* next_node = new Node(board, actions, moves, node_i);
+                                bool pushed = false;
+                                if (next_moves <= MAX_MOVES &&
+                                    (next_q.size() < beam_width || NodePointerCmp()(next_node, next_q.top())))
                                 {
                                     const ull board_hash = board.hash();
                                     if (!next_hash.count(board_hash))
@@ -692,9 +745,12 @@ public:
                                         next_hash.insert(board_hash);
                                         next_q.push(next_node);
 
+                                        pushed = true;
                                         ++nexts;
                                     }
                                 }
+                                if (!pushed)
+                                    delete next_node;
                             }
                             else
                             {
@@ -796,7 +852,7 @@ private:
 
             static vector<Action> acts;
             acts.clear();
-            if (!solve_min_actions(board, sx, sy, color, fixed, max_cost, acts))
+            if (!solve_min_actions(board, sx, sy, color, fixed, max_cost - res_actions.size(), acts))
                 return false;
 
             for (auto& a : acts)
@@ -877,52 +933,6 @@ private:
     const Board& init_board;
     const int n;
     const int colors;
-
-
-    struct Node
-    {
-        Node(const Board& board, const vector<Action>& actions, int prev_moves, int prev_index)
-            :
-                board(board),
-                actions_size(actions.size()),
-                prev_moves(prev_moves),
-                prev_index(prev_index)
-        {
-            assert(actions_size <= MAX_COST);
-            rep(i, actions_size)
-                this->actions[i] = actions[i];
-
-            score = eval_board();
-        }
-
-        bool operator<(const Node& other) const
-        {
-            return score > other.score;
-        }
-
-        bool operator>(const Node& other) const
-        {
-            return score < other.score;
-        }
-
-        Board board;
-        Action actions[MAX_COST];
-        int actions_size;
-        int prev_moves;
-        int prev_index;
-
-        int get_score() const
-        {
-            return score;
-        }
-
-    private:
-        int eval_board()
-        {
-            return board.get_score() * 4 + board.get_same_three_color_rects();
-        }
-        int score;
-    };
 };
 
 class SquareRemover
