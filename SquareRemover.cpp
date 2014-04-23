@@ -627,6 +627,7 @@ struct NodePointerCmp
     }
 };
 
+
 class Solver
 {
 public:
@@ -646,7 +647,7 @@ public:
         const double GLOBAL_TLE = 1e9 * 9 * 1000;
 #endif
 #else
-        const double GLOBAL_TLE = 29.9 * 1000;
+        const double GLOBAL_TLE = 29.8 * 1000;
 #endif
 
         Timer g_timer;
@@ -682,14 +683,6 @@ public:
                 stage_q.pop();
             }
 
-#if 0
-            vector<int> scores;
-            for (Node& node : stage)
-                scores.push_back(node.board.get_score());
-            sort(all(scores));
-            fprintf(stderr, "%5d: %d\n", moves, stage.size());
-            cerr << scores << endl;
-#endif
 
             const double start_t = g_timer.get_elapsed();
             for (int node_i = sz(stage) - 1; node_i >= 0; --node_i)
@@ -902,27 +895,30 @@ private:
             {
                 int nx = cx + dir_dx[dir];
                 int ny = cy + dir_dy[dir];
-                uchar npos = encode_pos(nx, ny);
-                if (in_sq(nx, ny, n) && !fixed[npos] && !visit[npos])
+                if (in_sq(nx, ny, n))
                 {
-                    visit.set(npos);
-                    used_dir[npos] = Dir(dir);
-
-                    if (board.at(nx, ny) == color)
+                    uchar npos = encode_pos(nx, ny);
+                    if (!fixed[npos] && !visit[npos])
                     {
-                        for (int x = nx, y = ny; x != sx || y != sy; )
+                        visit.set(npos);
+                        used_dir[npos] = Dir(dir);
+
+                        if (board.at(nx, ny) == color)
                         {
-                            assert(visit[encode_pos(x, y)]);
-                            Dir dir = rev_dir(used_dir[encode_pos(x, y)]);
-                            res_actions.push_back(Action(x, y, dir));
+                            for (int x = nx, y = ny; x != sx || y != sy; )
+                            {
+                                assert(visit[encode_pos(x, y)]);
+                                Dir dir = rev_dir(used_dir[encode_pos(x, y)]);
+                                res_actions.push_back(Action(x, y, dir));
 
-                            x += dir_dx[dir];
-                            y += dir_dy[dir];
+                                x += dir_dx[dir];
+                                y += dir_dy[dir];
+                            }
+                            return true;
                         }
-                        return true;
-                    }
 
-                    q.push(pss(npos, ncost));
+                        q.push(pss(npos, ncost));
+                    }
                 }
             }
         }
